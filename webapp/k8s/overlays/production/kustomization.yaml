@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: hello-world-production
+
+bases:
+  - ../../base
+
+patchesStrategicMerge:
+  - config.yaml
+
+replicas:
+  - name: hello-world
+    count: 3
+
+images:
+  - name: hello-world
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/hello-world
+    newTag: production-latest
+
+configMapGenerator:
+  - name: app-config
+    literals:
+      - environment=production

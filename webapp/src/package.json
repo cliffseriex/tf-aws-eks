@@ -1,0 +1,16 @@
+{
+  "name": "hello-world-eks",
+  "version": "1.0.0",
+  "description": "Simple Hello World application for EKS deployment",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 0"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
