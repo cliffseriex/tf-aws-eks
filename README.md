@@ -51,12 +51,18 @@ export TG_BUCKET_PREFIX="thrive"
 export AWS_REGION="us-east-1"
 
 # Deploy staging environment
-cd terraform/environments/stag
-terragrunt apply --all --auto-approve
+cd terraform/environments/stag/vpc
+terragrunt apply --auto-approve
+
+cd ../alb
+terragrunt apply --auto-approve
+
+cd ../eks
+terragrunt apply --auto-approve
 
 # Deploy production environment
-cd ../prod
-terragrunt apply --all --auto-approve
+cd ../../prod
+terragrunt apply --auto-approve
 ```
 
 ### 3. Configure kubectl
@@ -198,10 +204,10 @@ aws ecr delete-repository --repository-name hello-world --force
 aws s3 rb s3://<your-bucket> --force
 aws dynamodb delete-table --table-name terraform-state-lock
 ```
-
+   
 ## CI/CD Workflow
-
 1. **Feature Development**: Create feature branch → Push code
 2. **Staging**: Merge to `develop` → Auto-deploy to staging
 3. **Production**: Merge to `main` → Auto-deploy to production
+
 
