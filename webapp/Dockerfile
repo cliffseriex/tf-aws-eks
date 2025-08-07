@@ -4,7 +4,12 @@ FROM node:18-alpine AS builder
 # Install dependencies for building
 WORKDIR /app
 COPY src/package*.json ./
-RUN npm ci --only=production
+# Use npm install if package-lock.json doesn't exist, otherwise use npm ci
+RUN if [ -f "package-lock.json" ]; then \
+        npm ci --omit=dev; \
+    else \
+        npm install --omit=dev; \
+    fi
 
 # Production stage
 FROM node:18-alpine
@@ -12,9 +17,9 @@ FROM node:18-alpine
 # Install dumb-init for proper signal handling
 RUN apk add --no-cache dumb-init
 
-# Create non-root user
-RUN addgroup -g 1001 nodejs && \
-    adduser -S -u 1001 -G nodejs nodejs
+# Create non-root user (check if group exists first)
+RUN addgroup -g 1001 -S nodejs 2>/dev/null || true && \
+    adduser -S -u 1001 -G nodejs nodejs 2>/dev/null || true
 
 # Set working directory
 WORKDIR /app

@@ -9,12 +9,11 @@ on:
     branches:
       - main
       - develop
-  workflow_dispatch:  # Manual trigger
 
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: hello-world
-  WEBAPP_DIR: webapp  # Define webapp directory
+  WORKING_DIRECTORY: webapp  # Added to handle webapp subdirectory
 
 jobs:
   build:
@@ -62,13 +61,14 @@ jobs:
       id: build
       uses: docker/build-push-action@v5
       with:
-        context: ./webapp  # Point to webapp directory
-        file: ./webapp/Dockerfile  # Specify Dockerfile path
+        context: ${{ env.WORKING_DIRECTORY }}  # Updated context
+        file: ${{ env.WORKING_DIRECTORY }}/Dockerfile  # Explicit Dockerfile path
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        platforms: linux/amd64
 
   deploy-staging:
     name: Deploy to Staging
@@ -102,20 +102,50 @@ jobs:
         curl -s "https://raw.githubusercontent.com/kubernetes-tools/kustomize/master/hack/install_kustomize.sh" | bash
         sudo mv kustomize /usr/local/bin/
 
+    - name: Create namespaces if not exists
+      run: |
+        kubectl create namespace hello-world-staging --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Deploy to Kubernetes
       run: |
-        cd webapp/k8s/overlays/staging  # Change to webapp k8s directory
+        cd ${{ env.WORKING_DIRECTORY }}/k8s/overlays/staging
         export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-        kustomize edit set image hello-world=$AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:develop-${{ github.sha }}
+        export IMAGE_TAG=develop-${{ github.sha }}
+        
+        # Update kustomization with new image
+        cat > image-patch.yaml <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: hello-world
+        spec:
+          template:
+            spec:
+              containers:
+              - name: hello-world
+                image: $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+        EOF
+        
+        # Apply the configuration
         kustomize build . | kubectl apply -f -
+        
+        # Wait for rollout
         kubectl rollout status deployment/hello-world -n hello-world-staging --timeout=5m
 
     - name: Run smoke tests
       run: |
+        # Wait for pods to be ready
         kubectl wait --for=condition=ready pod -l app=hello-world -n hello-world-staging --timeout=300s
-        SERVICE_IP=$(kubectl get svc hello-world-service -n hello-world-staging -o jsonpath='{.spec.clusterIP}')
-        kubectl run curl-test --image=curlimages/curl:latest --rm -i --restart=Never -- \
-          curl -f http://$SERVICE_IP/health || exit 1
+        
+        # Port forward to test the service
+        kubectl port-forward service/hello-world-service 8080:80 -n hello-world-staging &
+        sleep 5
+        
+        # Test the health endpoint
+        curl -f http://localhost:8080/health || exit 1
+        
+        # Kill the port forward
+        kill %1
 
   deploy-production:
     name: Deploy to Production
@@ -149,22 +179,53 @@ jobs:
         curl -s "https://raw.githubusercontent.com/kubernetes-tools/kustomize/master/hack/install_kustomize.sh" | bash
         sudo mv kustomize /usr/local/bin/
 
+    - name: Create namespaces if not exists
+      run: |
+        kubectl create namespace hello-world-production --dry-run=client -o yaml | kubectl apply -f -
+
     - name: Deploy to Kubernetes
       run: |
-        cd webapp/k8s/overlays/production  # Change to webapp k8s directory
+        cd ${{ env.WORKING_DIRECTORY }}/k8s/overlays/production
         export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-        kustomize edit set image hello-world=$AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:main-${{ github.sha }}
+        export IMAGE_TAG=main-${{ github.sha }}
+        
+        # Update kustomization with new image
+        cat > image-patch.yaml <<EOF
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: hello-world
+        spec:
+          template:
+            spec:
+              containers:
+              - name: hello-world
+                image: $AWS_ACCOUNT_ID.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+        EOF
+        
+        # Apply the configuration
         kustomize build . | kubectl apply -f -
+        
+        # Wait for rollout
         kubectl rollout status deployment/hello-world -n hello-world-production --timeout=10m
 
     - name: Run smoke tests
       run: |
+        # Wait for pods to be ready
         kubectl wait --for=condition=ready pod -l app=hello-world -n hello-world-production --timeout=300s
-        SERVICE_IP=$(kubectl get svc hello-world-service -n hello-world-production -o jsonpath='{.spec.clusterIP}')
-        kubectl run curl-test --image=curlimages/curl:latest --rm -i --restart=Never -- \
-          curl -f http://$SERVICE_IP/health || exit 1
+        
+        # Port forward to test the service
+        kubectl port-forward service/hello-world-service 8080:80 -n hello-world-production &
+        sleep 5
+        
+        # Test the health endpoint
+        curl -f http://localhost:8080/health || exit 1
+        
+        # Kill the port forward
+        kill %1
 
     - name: Create deployment annotation
       run: |
         kubectl annotate deployment hello-world -n hello-world-production \
-          kubernetes.io/change-cause="Deployed version ${{ github.sha }} by GitHub Actions"
+          kubernetes.io/change-cause="Deployed version ${{ github.sha }} by GitHub Actions" \
+          --overwrite
