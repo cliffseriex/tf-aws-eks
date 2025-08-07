@@ -119,6 +119,7 @@ Navigate to Settings → Secrets and variables → Actions
 gh secret set AWS_ACCESS_KEY_ID --body "YOUR_ACCESS_KEY_ID"
 gh secret set AWS_SECRET_ACCESS_KEY --body "YOUR_SECRET_ACCESS_KEY"
 
+
 # Or add manually in GitHub UI:
 # - AWS_ACCESS_KEY_ID: (from step 1.2)
 # - AWS_SECRET_ACCESS_KEY: (from step 1.2)
