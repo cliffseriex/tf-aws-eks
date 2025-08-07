@@ -47,7 +47,7 @@ Deploy Staging Environment
 
 cd environments/stag
 
-# Plan the deployment
+
 cd environments/stag/vpc
 terragrunt plan
 terragrunt apply
@@ -60,9 +60,6 @@ cd environments/stag/eks
 terragrunt plan
 terragrunt apply
 
-# Configure kubectl
-aws eks update-kubeconfig --name webapp-cluster --region us-east-1
-
 
 Deploy Production Environment
 similiar to the stag
@@ -73,3 +70,55 @@ chmod +x webapp/env_setup.sh
 ./webapp/env_setup.sh
 
 
+#  Create ECR repository
+aws ecr create-repository --repository-name hello-world --region us-east-1
+
+# update your kubeconfig
+aws eks update-kubeconfig --name webapp-cluster --region $AWS_REGION
+
+# Create a ConfigMap to allow the IAM user to access the cluster
+cat > aws-auth-patch.yaml << EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapUsers: |
+    - userarn: arn:aws:iam::$AWS_ACCOUNT_ID:user/github-actions-deploy
+      username: github-actions-deploy
+      groups:
+        - system:masters
+EOF
+
+# Apply the ConfigMap patch
+kubectl apply -f aws-auth-patch.yaml
+
+# Create namespaces
+kubectl create namespace hello-world-staging || true
+kubectl create namespace hello-world-production || true
+
+
+# Install AWS Load Balancer Controller (if not already installed)
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+# Install the controller
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=webapp-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller || true
+
+
+## Add Secrets to GitHub Repository
+Go to your GitHub repository settings:
+
+Navigate to Settings → Secrets and variables → Actions
+# If using GitHub CLI:
+gh secret set AWS_ACCESS_KEY_ID --body "YOUR_ACCESS_KEY_ID"
+gh secret set AWS_SECRET_ACCESS_KEY --body "YOUR_SECRET_ACCESS_KEY"
+
+# Or add manually in GitHub UI:
+# - AWS_ACCESS_KEY_ID: (from step 1.2)
+# - AWS_SECRET_ACCESS_KEY: (from step 1.2)
